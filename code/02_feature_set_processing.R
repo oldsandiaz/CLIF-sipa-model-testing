@@ -1,6 +1,4 @@
-#################################################
-### Feature set creation for model development
-#################################################
+# Feature set creation for model development
 
 # Load necessary libraries
 print("Initialized Feature Set Processing Script")
@@ -10,6 +8,7 @@ library(tidyverse)
 library(stringr)
 library(data.table)
 library(tictoc)
+
 # Clear env
 rm(list = ls())
 
@@ -18,14 +17,12 @@ source("utils/config.R")
 output_path <- config$output_path
 
 # Load data
-data <- read_parquet(paste0(output_path, "/sipa_clif_cohort.parquet"))
+data <- read_parquet(file.path(output_path, "intermediate", "sipa_clif_cohort.parquet"))
 
 # Convert to data.table
 setDT(data)
 
-################
-### Vectorized SOFA score calculation
-################
+# Vectorized SOFA score calculation
 
 tic()
 compute_sofa_score_vec <- function(p_f, s_f, platelets, bilirubin, map, dopamine, dobutamine, norepinephrine, epinephrine, gcs, creatinine) {
@@ -100,9 +97,8 @@ compute_sofa_score_vec <- function(p_f, s_f, platelets, bilirubin, map, dopamine
 # Calculate SOFA score for each hour
 data[, sofa_score := compute_sofa_score_vec(p_f_imputed, s_f, min_plt_count, max_bilirubin, min_map, dopamine, dobutamine, norepinephrine, epinephrine, gcs_total, max_creatinine)]
 
-################
-### Summarize features
-################
+
+# Summarize features
 
 # Create datetime column
 data[, meas_dttm := as.POSIXct(paste(meas_date, sprintf("%02d:00:00", meas_hour)), format = "%Y-%m-%d %H:%M:%S", tz = "UTC")]
@@ -169,7 +165,10 @@ patient_data <- unique(data[, .(patient_id, hospitalization_id, ethnicity_catego
 # Join summarized data with patient data
 final_data <- merge(patient_data, wide_data, by = "hospitalization_id", all.x = TRUE)
 
+# Create the directory if it doesn't exist
+dir.create(file.path(output_path, "final"), showWarnings = FALSE, recursive = TRUE)
+
 # Export final data
-write_parquet(final_data, paste0(output_path, "/sipa_features.parquet"))
+write_parquet(final_data, file.path(output_path, "final", "sipa_features.parquet"))
 toc()
-print("Feature set exported to output_path")
+print(paste("Feature set exported to", file.path(output_path, "final")))
