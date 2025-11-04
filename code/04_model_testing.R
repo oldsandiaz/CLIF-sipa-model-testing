@@ -23,15 +23,20 @@ set.seed(42) # the meaning of life
 data <- read_parquet(paste0(output_path, "/sipa_features.parquet"))
 
 sofa_age_all <- data %>%
-   select(p_f_pre, s_f_pre, platelets_pre, bilirubin_pre, map_pre, gcs_pre, creatinine_pre, norepinephrine_eq_pre, p_f_post, s_f_post, platelets_post, bilirubin_post, map_post, gcs_post, creatinine_post, norepinephrine_eq_post, age_at_admission) %>%
-    mutate(across(everything(), ~replace_na(.x, 0)))
+  select(p_f_pre, s_f_pre, platelets_pre, bilirubin_pre, map_pre, gcs_pre, creatinine_pre, norepinephrine_eq_pre, p_f_post, s_f_post, platelets_post, bilirubin_post, map_post, gcs_post, creatinine_post, norepinephrine_eq_post, age_at_admission) %>%
+  mutate(across(everything(), ~replace_na(.x, 0)))
+
+sofa_score_only <- data %>%
+  select(sofa_score_pre, sofa_score_post) %>%
+  mutate(across(everything(), ~replace_na(.x, 0))) %>%
+  rowwise() %>%
+  mutate(worst_sofa_score = max(sofa_score_pre, sofa_score_post)) %>%
+  select(worst_sofa_score)
 
 # Load all models contained in the models directory
 model_files <- list.files("/Users/cdiaz/Desktop/SRP/clif-sipa-model-testing/models", full.names = TRUE)
 
 # Models will either be .txt or .rds files. Load based on file extension.
-
-# Function to load models based on file extension
 load_model <- function(file_path) {
   ext <- tools::file_ext(file_path)
   if (ext == "txt") {
@@ -45,8 +50,13 @@ load_model <- function(file_path) {
 }
 
 # Load all models into a named list
-models <- lapply(model_files, load_model)
-names(models) <- basename(model_files)
+all_models <- lapply(model_files, load_model)
+names(all_models) <- basename(model_files)
+
+# Separate models
+sofa_glm_models <- all_models[grep("glm_sofa_score_.*.rds", names(all_models))]
+ensemble_models <- all_models[!names(all_models) %in% names(sofa_glm_models)]
+
 
 # Helper function to run prediction based on model type
 predict_model <- function(model, feature_matrix) {
@@ -70,110 +80,49 @@ predict_model <- function(model, feature_matrix) {
     pred <- predict(model, newx = as.matrix(feature_matrix), type = "response", s = lambda_val)
     return(as.numeric(pred))
   }
+  # Caret train object
+  if (inherits(model, "train")) {
+    return(as.numeric(predict(model, newdata = feature_matrix, type = "prob")[,2])) # Assuming binary classification and taking probability of the second class
+  }
   # Try generic prediction for other model types
   return(as.numeric(predict(model, newdata = feature_matrix, type = "response")))
 }
 
-# Run predictions for all models
-pred_matrix <- sapply(models, predict_model, feature_matrix = sofa_age_all)
+# Run predictions for SOFA models
+sofa_pred_matrix <- sapply(sofa_glm_models, predict_model, feature_matrix = sofa_score_only)
+sofa_glm_pred <- rowMeans(sofa_pred_matrix)
 
-# SIMPLE ENSEMBLE: AVERAGE ACROSS ALL PREDICTIONS
-ensemble_pred <- rowMeans(pred_matrix)
+# Run predictions for Ensemble models
+ensemble_pred_matrix <- sapply(ensemble_models, predict_model, feature_matrix = sofa_age_all)
+ensemble_pred <- rowMeans(ensemble_pred_matrix)
 
-# Calculate AUC for the ensemble model
-auc_ensemble <- roc(data$in_hospital_mortality, ensemble_pred)$auc
 
-cat(sprintf("Ensemble AUC: %.4f\n", auc_ensemble))
+# Calculate AUC for both models
+roc_sofa <- roc(data$in_hospital_mortality, sofa_glm_pred, ci = TRUE)
+roc_ensemble <- roc(data$in_hospital_mortality, ensemble_pred, ci = TRUE)
 
-# Calibration plot for ensemble
-
-# Ensure race_group is defined
-data$race_group <- ifelse(data$race == "Black or African American", "Black", "Non-Black")
-
-# Ensemble predictions (assuming pred_matrix is already calculated)
-ensemble_pred <- rowMeans(pred_matrix)
-
-# Output variable for calibration (must be factor)
-output <- factor(ifelse(data$in_hospital_mortality == 1, "Dead", "Alive"), levels = c("Alive", "Dead"))
-
-# Calibration plot for ensemble, stratified by race
-cal_data_ensemble <- data.frame(
-  prob = ensemble_pred,
-  y = output,
-  race = data$race_group
+# Create a data frame for plotting
+auc_data <- data.frame(
+  model = c("SOFA Score Only", "Ensemble Model"),
+  auc = c(roc_sofa$auc, roc_ensemble$auc),
+  ci_low = c(roc_sofa$ci[1], roc_ensemble$ci[1]),
+  ci_high = c(roc_sofa$ci[3], roc_ensemble$ci[3])
 )
 
-cal_obj_black <- caret::calibration(y ~ prob, data = subset(cal_data_ensemble, race == "Black"), class = "Dead")
-cal_obj_non_black <- caret::calibration(y ~ prob, data = subset(cal_data_ensemble, race == "Non-Black"), class = "Dead")
-
-plot_data_ensemble <- rbind(
-  data.frame(cal_obj_black$data, race = "Black Patients"),
-  data.frame(cal_obj_non_black$data, race = "Non-Black Patients")
-)
-
-p_ensemble <- ggplot(plot_data_ensemble, aes(x = midpoint, y = Percent, color = race)) +
-  geom_line() +
-  geom_point() +
-  geom_abline(intercept = 0, slope = 1, linetype = "dashed") +
+# Plot AUC comparison
+p_auc_comparison <- ggplot(auc_data, aes(x = model, y = auc, fill = model)) +
+  geom_bar(stat = "identity", position = "dodge") +
+  geom_errorbar(aes(ymin = ci_low, ymax = ci_high), width = 0.2, position = position_dodge(0.9)) +
   labs(
-    title = "Calibration Plot for Ensemble Model",
-    x = "Predicted Probability",
-    y = "Observed Frequency"
+    title = "SOFA Score vs. Ensemble Model",
+    x = "Model",
+    y = "AUC"
   ) +
   theme_classic() +
-  scale_color_manual(values = wesanderson::wes_palette("GrandBudapest2", n = 2))
+  scale_fill_manual(values = wesanderson::wes_palette("GrandBudapest2", n = 2)) +
+  guides(fill = "none")
 
-ggsave(p_ensemble, filename = paste0(output_path, "/calibration_ensemble.png"), width = 6, height = 4)
+ggsave(p_auc_comparison, filename = paste0(output_path, "/auc_comparison.png"), width = 6, height = 4)
 
-# Calculate allocation efficiency for ensemble model vs random allocation
-
-calculate_efficiency <- function(predicted_mortality, true_mortality, s_grid = seq(0, 1, by = 0.01)) {
-  N <- length(true_mortality)
-  survivors <- 1 - true_mortality
-  res <- purrr::map_dfr(s_grid, function(s) {
-    V <- floor(s * N)
-    if (V == 0) {
-      eff <- NA_real_
-    } else {
-      selected_idx <- order(predicted_mortality)[1:V]
-      survivors_allocated <- sum(survivors[selected_idx])
-      eff <- survivors_allocated / V
-    }
-    tibble(s = s, efficiency = eff)
-  })
-  res
-}
-
-# The true mortality vector
-true_mortality_vector <- data$in_hospital_mortality
-
-# Ensemble prediction (already calculated)
-ensemble_pred <- rowMeans(pred_matrix)
-
-# Efficiency for ensemble
-eff_ensemble <- calculate_efficiency(ensemble_pred, true_mortality_vector)
-
-# Efficiency for random allocation
-eff_random <- calculate_efficiency(runif(length(true_mortality_vector)), true_mortality_vector)
-
-# Combine results for plotting
-eff_all <- bind_rows(
-  eff_random %>% mutate(model = "Random Allocation"),
-  eff_ensemble %>% mutate(model = "Ensemble Model")
-)
-
-# Plot
-allocation_plot <- ggplot(eff_all, aes(x = s, y = efficiency, color = model)) +
-  geom_line(size = 1.2, na.rm = TRUE) +
-  scale_x_continuous(name = "Life support supply, s", breaks = seq(0, 1, 0.1)) +
-  scale_y_continuous(name = "Allocation Efficiency", limits = c(0, 1)) +
-  ggtitle("Allocation Efficiency: Ensemble vs Random") +
-  theme_classic() +
-  theme(text = element_text(size = 14)) +
-  scale_color_manual(values = wesanderson::wes_palette("GrandBudapest2", n = 2))
-
-# Save plot
-saveRDS(allocation_plot, file.path(output_path, "/ensemble_vs_random_allocation_efficiency_plot.rds"))
-
-print("Finished Ensemble vs Random Allocation Efficiency Analysis.")
+print("Finished AUC Comparison Analysis.")
 
