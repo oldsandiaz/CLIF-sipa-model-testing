@@ -529,6 +529,12 @@ df_resp_support_conv <- df_resp_support_conv %>%
 
 summary(df_resp_support_conv$fio2_approx)
 
+# Define the output directory
+intermediate_output_path <- file.path(output_path, "intermediate")
+
+# Create the directory if it doesn't exist
+dir.create(intermediate_output_path, showWarnings = FALSE, recursive = TRUE)
+
 # Save the processed data
-write_parquet(df_resp_support_conv, file.path(output_path, paste0("clif_respiratory_support_processed", file_type)))
-print("Table exported as parquet to output_path")
+write_parquet(df_resp_support_conv, file.path(intermediate_output_path, paste0("clif_respiratory_support_processed", file_type)))
+print(paste("Table exported as parquet to", intermediate_output_path))
