@@ -1,6 +1,5 @@
 # Load necessary libraries
 print("Initializing Table1 Script")
-
 library(arrow)
 library(tidyverse)
 library(stringr)
@@ -23,7 +22,7 @@ site_name <- config$site_name
 
 print("Creating STROBE Diagram")
 # Construct a STROBE diagram
-inclusion_table <- read.csv(file.path(output_path, "inclusion_table.csv"))
+inclusion_table <- read.csv(file.path(output_path, "exportable", "inclusion_table.csv"))
 
 strobe_diagram <- DiagrammeR::grViz(glue("
   digraph STROBE {{
@@ -104,12 +103,15 @@ strobe_diagram <- DiagrammeR::grViz(glue("
   }}
 "))
 
+# Create the exportable directory if it doesn't exist
+dir.create(file.path(output_path, "exportable"), showWarnings = FALSE, recursive = TRUE)
+
 # Save the diagram as a PNG file
-grVizToPNG(strobe_diagram, width = 600, height = 700, "output")
+DiagrammeR::export_graph(strobe_diagram, file_name = file.path(output_path, "exportable", "strobe_diagram.png"))
 print("STROBE diagram exported.")
 
 # Load the SIPA features dataset
-data <- read_parquet(paste0(output_path, "/sipa_features.parquet"))
+data <- read_parquet(file.path(output_path, "final", "sipa_features.parquet"))
 
 # Correct column names by removing trailing underscore
 setnames(data, names(data), sub("__", "_", names(data)))
@@ -281,6 +283,6 @@ table1_df <- tibble::tibble(
 )
 
 # Export as a separate CSV file
-write.csv(table1_df, file.path(output_path, paste0("/table1_", site_name, ".csv")), row.names = FALSE)
-print("Table 1 exported as CSV to output_path")
+write.csv(table1_df, file.path(output_path, "exportable", "table1.csv"), row.names = FALSE)
+print("Table 1 exported as CSV to output/exportable")
 toc()
