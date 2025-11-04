@@ -23,8 +23,8 @@ set.seed(42) # the meaning of life
 data <- read_parquet(paste0(output_path, "/sipa_features.parquet"))
 
 sofa_age_all <- data %>%
-  select(p_f_pre, s_f_pre, platelets_pre, bilirubin_pre, map_pre, gcs_pre, creatinine_pre, phenylephrine_pre, norepinephrine_pre, vasopressin_pre, dopamine_pre, dobutamine_pre, milrinone_pre, epinephrine_pre, angiotensin_pre,p_f_post, s_f_post, platelets_post, bilirubin_post, map_post, gcs_post, creatinine_post, phenylephrine_post, norepinephrine_post, vasopressin_post, dopamine_post, dobutamine_post, milrinone_post, epinephrine_post, angiotensin_post, age_at_admission) %>%
-  mutate(across(everything(), ~replace_na(.x, 0)))
+   select(p_f_pre, s_f_pre, platelets_pre, bilirubin_pre, map_pre, gcs_pre, creatinine_pre, norepinephrine_eq_pre, p_f_post, s_f_post, platelets_post, bilirubin_post, map_post, gcs_post, creatinine_post, norepinephrine_eq_post, age_at_admission) %>%
+    mutate(across(everything(), ~replace_na(.x, 0)))
 
 # Load all models contained in the models directory
 model_files <- list.files("/Users/cdiaz/Desktop/SRP/clif-sipa-model-testing/models", full.names = TRUE)
