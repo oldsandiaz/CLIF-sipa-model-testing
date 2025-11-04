@@ -1,3 +1,8 @@
+# Cohort Identification script for subsequent feature set processing
+# REQUIRES 0a_respiratory_support_waterfall.R 
+
+# Load libraries
+
 library(knitr)
 library(here)
 library(tidyverse)
@@ -18,6 +23,7 @@ tic("Script Completion")
 
 rm(list = ls())
 
+# Helper function to create DuckDB connection
 write_files_to_duckdb <- function(files, tables_location, file_type, con) {
   for (file_name in files) {
     table_name <- tools::file_path_sans_ext(file_name)
@@ -172,7 +178,7 @@ tic("Respiratory Support Data Processing")
 # Respiratory Support
 ## Load data and rename columns
 ## The loaded file was processed by the script: 0a_respiratory_support_waterfall.R
-resp_support <- read_parquet("output/clif_respiratory_support_processed.parquet")
+resp_support <- read_parquet(file.path(output_path, "intermediate", "clif_respiratory_support_processed.parquet"))
 
 # Convert to data.table
 setDT(resp_support)
@@ -635,6 +641,9 @@ med_unit_info <- list(
 
 # Convert medication doses to norepinephrine equivalents
 # Name: med name + ne_equiv
+# Source: Vasopressor dose equivalence: A scoping review and suggested formula by Goradia et al. from Journal of Critical Care Medicine
+# DOI: 10.1016/j.jcrc.2020.11.002
+
 ## First convert med_dose_unit to lowercase
 pressors_with_weight <- pressors_with_weight %>%
   mutate(med_dose_unit = tolower(med_dose_unit))
@@ -858,10 +867,13 @@ cohort_table <- cohort_tracking("Final", cohort_final, cohort_table)
 
 toc()
 
-write.csv(cohort_table, file.path(output_path, "inclusion_table.csv"), row.names = FALSE)
-write_parquet(cohort_final, file.path(output_path, paste0("sipa_clif_cohort", file_type)))
-print("Data exported as parquet to output_path")
-print("Cohort tracking table exported as csv to output_path")
+# Create the directories if they don't exist
+dir.create(file.path(output_path, "exportable"), showWarnings = FALSE, recursive = TRUE)
+dir.create(file.path(output_path, "intermediate"), showWarnings = FALSE, recursive = TRUE)
+
+write.csv(cohort_table, file.path(output_path, "exportable", "inclusion_table.csv"), row.names = FALSE)
+write_parquet(cohort_final, file.path(output_path, "intermediate", paste0("sipa_clif_cohort", file_type)))
+print(paste("Data exported as parquet to", file.path(output_path, "intermediate")))
+print(paste("Cohort tracking table exported as csv to", file.path(output_path, "exportable")))
 print(cohort_table)
 duckdb::dbDisconnect(con, shutdown=TRUE)
-
