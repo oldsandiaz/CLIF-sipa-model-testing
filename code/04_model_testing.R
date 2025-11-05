@@ -102,27 +102,70 @@ roc_sofa <- roc(data$in_hospital_mortality, sofa_glm_pred, ci = TRUE)
 roc_ensemble <- roc(data$in_hospital_mortality, ensemble_pred, ci = TRUE)
 
 # Create a data frame for plotting
-auc_data <- data.frame(
-  model = c("SOFA Score Only", "Ensemble Model"),
-  auc = c(roc_sofa$auc, roc_ensemble$auc),
-  ci_low = c(roc_sofa$ci[1], roc_ensemble$ci[1]),
-  ci_high = c(roc_sofa$ci[3], roc_ensemble$ci[3])
+roc_sofa_data <- data.frame(
+  fpr = 1 - roc_sofa$specificities,
+  tpr = roc_sofa$sensitivities,
+  model = "SOFA Score Only"
 )
 
-# Plot AUC comparison
-p_auc_comparison <- ggplot(auc_data, aes(x = model, y = auc, fill = model)) +
-  geom_bar(stat = "identity", position = "dodge") +
-  geom_errorbar(aes(ymin = ci_low, ymax = ci_high), width = 0.2, position = position_dodge(0.9)) +
+roc_ensemble_data <- data.frame(
+  fpr = 1 - roc_ensemble$specificities,
+  tpr = roc_ensemble$sensitivities,
+  model = "Ensemble Model"
+)
+
+roc_data <- rbind(roc_sofa_data, roc_ensemble_data)
+
+# Calculate confidence intervals for the ROC curves
+ci_sofa <- ci.sp(roc_sofa, sensitivities=seq(0, 1, .01), boot.n=100)
+ci_ensemble <- ci.sp(roc_ensemble, sensitivities=seq(0, 1, .01), boot.n=100)
+
+ci_sofa_data <- data.frame(
+  tpr = as.numeric(rownames(ci_sofa)),
+  fpr_low = 1 - ci_sofa[, 3],
+  fpr_high = 1 - ci_sofa[, 1],
+  model = "SOFA Score Only"
+)
+
+ci_ensemble_data <- data.frame(
+  tpr = as.numeric(rownames(ci_ensemble)),
+  fpr_low = 1 - ci_ensemble[, 3],
+  fpr_high = 1 - ci_ensemble[, 1],
+  model = "Ensemble Model"
+)
+
+ci_data <- rbind(ci_sofa_data, ci_ensemble_data)
+
+# Get AUC values
+auc_sofa <- format(roc_sofa$auc, digits = 2)
+auc_ensemble <- format(roc_ensemble$auc, digits = 2)
+
+# Create legend labels
+legend_labels <- c(
+  `SOFA Score Only` = paste0("SOFA Score Only (AUC = ", auc_sofa, ")"),
+  `Ensemble Model` = paste0("Ensemble Model (AUC = ", auc_ensemble, ")")
+)
+
+# Plot AUROC
+p_auroc <- ggplot() +
+  geom_ribbon(data = ci_data, aes(y = tpr, xmin = fpr_low, xmax = fpr_high, fill = model), alpha = 0.2) +
+  geom_line(data = roc_data, aes(x = fpr, y = tpr, color = model)) +
+  geom_abline(linetype = "dashed") +
   labs(
-    title = "SOFA Score vs. Ensemble Model",
-    x = "Model",
-    y = "AUC"
+    title = "Comparing AUROC: Ensemble Model vs SOFA Score Only",
+    x = "False Positive Rate",
+    y = "True Positive Rate",
+    color = "Model",
+    fill = "Model"
   ) +
   theme_classic() +
-  scale_fill_manual(values = wesanderson::wes_palette("GrandBudapest2", n = 2)) +
-  guides(fill = "none")
+  scale_color_manual(values = wesanderson::wes_palette("GrandBudapest2", n = 2), labels = legend_labels) +
+  scale_fill_manual(values = wesanderson::wes_palette("GrandBudapest2", n = 2), guide = "none") +
+  coord_fixed(ratio = 1) +
+  theme(legend.position = "bottom")
 
-ggsave(p_auc_comparison, filename = paste0(output_path, "/auc_comparison.png"), width = 6, height = 4)
+ggsave(p_auroc, filename = paste0(output_path, "/auroc_comparison.png"), width = 8, height = 8)
+
+p_auroc
 
 print("Finished AUC Comparison Analysis.")
-
